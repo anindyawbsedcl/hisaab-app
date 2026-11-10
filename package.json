@@ -1,0 +1,13 @@
+{
+  "name": "hisaab-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Modern Indian bill splitter with AI receipt scanning and settlement calculations",
+  "scripts": {
+    "check": "node --check app.js && node --check api/scan-bill.js && node scripts/check-version.mjs",
+    "version:patch": "node scripts/set-version.mjs patch",
+    "version:minor": "node scripts/set-version.mjs minor",
+    "version:major": "node scripts/set-version.mjs major",
+    "version:set": "node scripts/set-version.mjs"
+  }
+}

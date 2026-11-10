@@ -2,6 +2,9 @@
 
 Hisaab is a modern, mobile-friendly bill splitting web app built for Indian restaurant bills. It supports menu-level participant selection, equal or custom item splits, GST, settlement-only rounding, payer reimbursements, AI bill scanning, and downloadable PNG summaries.
 
+<!-- app-version -->
+**Current stable version:** `v1.0.0`
+
 ## Live App
 
 **[hisaab-by-anindya.vercel.app](https://hisaab-by-anindya.vercel.app)**
@@ -373,6 +376,114 @@ The project currently uses the production domain:
 ```text
 https://hisaab-by-anindya.vercel.app
 ```
+
+## Versioning and Releases
+
+The project follows [Semantic Versioning](https://semver.org/):
+
+| Change | Version example | Use when |
+|---|---|---|
+| Patch | `1.0.0` → `1.0.1` | Bug fix, copy change, styling fix, or small safe adjustment |
+| Minor | `1.0.0` → `1.1.0` | Backward-compatible feature or meaningful capability |
+| Major | `1.0.0` → `2.0.0` | Breaking workflow, API, data model, or deployment change |
+
+Every production deployment must have a version greater than the previous production version. Never reuse, move, or delete a published version tag.
+
+The version is recorded in four synchronized places:
+
+- `package.json`
+- `version.json`
+- `<meta name="application-version">` in `index.html`
+- The visible footer version in `index.html`
+
+The version helper updates all four locations and the version shown at the top of this README.
+
+### Bump a Version
+
+For a patch release:
+
+```powershell
+npm run version:patch
+```
+
+For a feature release:
+
+```powershell
+npm run version:minor
+```
+
+For a breaking release:
+
+```powershell
+npm run version:major
+```
+
+Set an explicit version when needed:
+
+```powershell
+npm run version:set -- 1.2.3
+```
+
+### Production Release Checklist
+
+1. Start from a clean `main` branch.
+2. Make and test the application changes.
+3. Run `npm run check`.
+4. Select the correct patch, minor, or major version bump.
+5. Review `git diff` and confirm no secret file is staged.
+6. Commit the code and version metadata together.
+7. Create an annotated immutable Git tag.
+8. Push `main` and the tag to GitHub.
+9. Deploy to Vercel production.
+10. Create a GitHub Release and record both the stable URL and immutable Vercel deployment URL.
+
+Example for version `1.0.1`:
+
+```powershell
+npm run check
+npm run version:patch
+git add app.js index.html styles.css api package.json version.json README.md
+git commit -m "Release v1.0.1"
+git tag -a v1.0.1 -m "Hisaab v1.0.1"
+git push origin main
+git push origin v1.0.1
+npx.cmd vercel@latest deploy --prod
+gh release create v1.0.1 --title "Hisaab v1.0.1" --notes "Describe the release and include its immutable Vercel deployment URL."
+```
+
+The example file list is not exhaustive. Stage every intended source file, but never stage `.env.local` or `.vercel/`.
+
+### Roll Back the Live Site
+
+Each GitHub Release should contain the immutable Vercel deployment URL produced during that version's deployment. To make a previous deployment live immediately:
+
+```powershell
+npx.cmd vercel@latest rollback previous-immutable-deployment.vercel.app --yes
+```
+
+This moves the production alias back without deleting newer source, commits, tags, or deployments.
+
+The same action is available in the Vercel dashboard: open **Deployments**, choose the desired successful deployment, and promote or roll it back to Production.
+
+### Restore Source From a Version
+
+Tags are immutable source snapshots. Inspect an old release without changing the current working tree:
+
+```powershell
+git show v1.0.0
+```
+
+Create an isolated worktree when an exact old version must be rebuilt or deployed:
+
+```powershell
+git worktree add ..\hisaab-v1.0.0 v1.0.0
+Push-Location ..\hisaab-v1.0.0
+npx.cmd vercel@latest deploy --prod
+Pop-Location
+git worktree remove ..\hisaab-v1.0.0
+```
+
+For a normal code rollback, prefer `git revert` on the unwanted commits, then publish a new patch version. This preserves history and keeps every released tag trustworthy.
 
 ## Environment Variables
 
