@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <meta name="description" content="Split restaurant bills, GST, and settlements in Indian rupees.">
+  <title>Hisaab | Indian Bill Splitter</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+
+  <main class="app-shell">
+    <header class="hero">
+      <div class="brand-mark" aria-label="Hisaab bill splitter">
+        <span class="brand-icon">H</span>
+        <span>Hisaab</span>
+      </div>
+      <div class="hero-copy">
+        <p class="eyebrow">Fair shares. Clear settlements.</p>
+        <h1>Split the table,<br><em>not the friendship.</em></h1>
+        <p class="hero-description">Build the bill item by item, add GST, and know exactly who pays whom.</p>
+      </div>
+      <div class="bill-preview" aria-live="polite">
+        <span>Running bill</span>
+        <strong id="billPreview">₹0.00</strong>
+      </div>
+    </header>
+
+    <section class="panel event-panel" aria-labelledby="eventHeading">
+      <div class="section-heading compact-heading">
+        <div>
+          <span class="step-number">00</span>
+          <h2 id="eventHeading">Rendezvous</h2>
+        </div>
+        <p>Give this bill a place or occasion.</p>
+      </div>
+      <label class="field event-field" for="eventName">
+        <span>Event or place</span>
+        <input id="eventName" type="text" maxlength="100" placeholder="Sunday lunch at Connaught Place" autocomplete="off">
+      </label>
+    </section>
+
+    <section class="panel" aria-labelledby="peopleHeading">
+      <div class="section-heading">
+        <div>
+          <span class="step-number">01</span>
+          <h2 id="peopleHeading">People</h2>
+        </div>
+        <p>Add everyone at the table.</p>
+      </div>
+
+      <form id="personForm" class="inline-form" novalidate>
+        <label class="field grow-field" for="personName">
+          <span>Person name</span>
+          <input id="personName" type="text" maxlength="50" placeholder="e.g. Aditi" autocomplete="off">
+        </label>
+        <button class="button secondary-button" type="submit">Add person</button>
+      </form>
+      <p id="personFeedback" class="field-feedback" aria-live="polite"></p>
+      <div id="peopleList" class="people-list"></div>
+    </section>
+
+    <section class="panel items-panel" aria-labelledby="itemsHeading">
+      <div class="section-heading section-heading-row">
+        <div>
+          <span class="step-number">02</span>
+          <h2 id="itemsHeading">Menu items</h2>
+        </div>
+        <p>Add each item, then choose who shared it.</p>
+      </div>
+
+      <div class="bill-import">
+        <div class="bill-import-copy">
+          <span class="feature-tag">Smart bill scan</span>
+          <h3>Import from a bill photo</h3>
+          <p>Use a clear, straight image. Item names, quantities, and prices stay editable before import.</p>
+          <label class="scan-button" for="billUpload">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 9h8v6H8z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>Upload or photograph bill</span>
+            <input id="billUpload" type="file" accept="image/png,image/jpeg,image/webp" capture="environment">
+          </label>
+          <small class="scan-privacy">Sent securely to LlamaExtract. If unavailable, private in-browser OCR is used.</small>
+        </div>
+
+        <div id="scanPreview" class="scan-preview">
+          <div id="scanPlaceholder" class="scan-placeholder">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 3h8l4 4v14H7zM15 3v5h4M10 12h6M10 16h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>Bill preview</span>
+          </div>
+          <img id="billPreviewImage" alt="Uploaded bill preview" hidden>
+          <div id="scanOverlay" class="scan-overlay" hidden>
+            <span class="scan-progress-track"><span id="scanProgress" class="scan-progress"></span></span>
+            <strong id="scanStatusText">Reading bill…</strong>
+          </div>
+        </div>
+      </div>
+      <p id="scanFeedback" class="field-feedback scan-feedback" aria-live="polite"></p>
+
+      <section id="scanResults" class="scan-results" aria-labelledby="scanResultsHeading" hidden>
+        <div class="scan-results-header">
+          <div>
+            <span class="feature-tag">OCR review</span>
+            <h3 id="scanResultsHeading"><span id="detectedItemCount">0</span> items detected</h3>
+          </div>
+          <button id="clearScanButton" class="text-button" type="button">Clear scan</button>
+        </div>
+        <div class="scan-table">
+          <div class="scan-table-header" aria-hidden="true">
+            <span>Use</span>
+            <span>Item name</span>
+            <span>Price each</span>
+            <span>Qty</span>
+            <span>Total</span>
+          </div>
+          <div id="scannedItemsList"></div>
+        </div>
+        <div class="scan-results-actions">
+          <details class="ocr-details">
+            <summary>View extracted text</summary>
+            <pre id="ocrRawText"></pre>
+          </details>
+          <button id="importScannedButton" class="button primary-button" type="button">Import selected items</button>
+        </div>
+      </section>
+
+      <div class="manual-divider"><span>or add an item manually</span></div>
+
+      <form id="itemForm" class="item-entry" novalidate>
+        <label class="field item-name-field" for="itemName">
+          <span>Item name</span>
+          <input id="itemName" type="text" maxlength="80" placeholder="Paneer tikka" autocomplete="off">
+        </label>
+        <label class="field item-price-field" for="itemPrice">
+          <span>Price each</span>
+          <span class="money-input">
+            <span aria-hidden="true">₹</span>
+            <input id="itemPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+          </span>
+        </label>
+        <label class="field item-quantity-field" for="itemQuantity">
+          <span>Quantity</span>
+          <input id="itemQuantity" type="number" value="1" min="1" step="1" inputmode="numeric">
+        </label>
+        <button class="button primary-button" type="submit">Add item</button>
+      </form>
+      <p id="itemFeedback" class="field-feedback" aria-live="polite"></p>
+      <div id="itemList" class="item-list"></div>
+    </section>
+
+    <section class="panel charges-panel" aria-labelledby="chargesHeading">
+      <div class="section-heading compact-heading">
+        <div>
+          <span class="step-number">03</span>
+          <h2 id="chargesHeading">Charges</h2>
+        </div>
+        <p>GST follows consumption; repayment rounding affects settlements only.</p>
+      </div>
+
+      <div class="gst-controls">
+        <label class="switch-row" for="gstEnabled">
+          <span class="switch-copy">
+            <strong>Add GST</strong>
+            <small>Enabled by default</small>
+          </span>
+          <span class="switch">
+            <input id="gstEnabled" type="checkbox" checked>
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+        <label id="gstRateField" class="field gst-rate-field" for="gstRate">
+          <span>GST rate</span>
+          <span class="suffix-input">
+            <input id="gstRate" type="number" value="5" min="0" max="100" step="0.1" inputmode="decimal">
+            <span aria-hidden="true">%</span>
+          </span>
+        </label>
+        <label class="switch-row round-off-row" for="roundOffEnabled">
+          <span class="switch-copy">
+            <strong>Round repayments</strong>
+            <small>Nearest ₹1 only in “Who pays whom”</small>
+          </span>
+          <span class="switch">
+            <input id="roundOffEnabled" type="checkbox" checked>
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel payment-panel" aria-labelledby="paymentHeading">
+      <div class="section-heading compact-heading">
+        <div>
+          <span class="step-number">04</span>
+          <h2 id="paymentHeading">Payment</h2>
+        </div>
+        <p>Record who settled the restaurant bill.</p>
+      </div>
+
+      <div>
+        <div class="payment-fields">
+          <label class="field" for="payerSelect">
+            <span>Bill paid by</span>
+            <select id="payerSelect">
+              <option value="">Add people first</option>
+            </select>
+          </label>
+          <label class="field" for="amountPaid">
+            <span>Amount paid</span>
+            <span class="money-input">
+              <span aria-hidden="true">₹</span>
+              <input id="amountPaid" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+            </span>
+          </label>
+        </div>
+        <p id="actualPaidHint" class="subtle-note">The final bill amount will be filled automatically.</p>
+      </div>
+    </section>
+
+    <section class="calculate-strip" aria-label="Calculate bill">
+      <div>
+        <strong>Ready to settle up?</strong>
+        <span>We'll calculate consumption, GST, and reimbursements.</span>
+      </div>
+      <button id="calculateButton" class="button calculate-button" type="button">Calculate split</button>
+    </section>
+    <p id="calculationFeedback" class="calculation-feedback" aria-live="assertive"></p>
+
+    <section id="summarySection" class="panel summary-panel" aria-labelledby="summaryHeading">
+      <div id="summaryContent" class="summary-empty">
+        <span class="summary-monogram">₹</span>
+        <h2 id="summaryHeading">Your settlement will appear here</h2>
+        <p>Add people and menu items, then calculate the split.</p>
+      </div>
+    </section>
+
+    <footer>
+      <span>Hisaab</span>
+      <span>Made with <span class="footer-heart" role="img" aria-label="love">♥</span> by A N I N D Y A</span>
+    </footer>
+  </main>
+</body>
+</html>
