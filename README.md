@@ -3,7 +3,7 @@
 Hisaab is a modern, mobile-friendly bill splitting web app built for Indian restaurant bills. It supports menu-level participant selection, equal or custom item splits, GST, settlement-only rounding, payer reimbursements, AI bill scanning, and downloadable PNG summaries.
 
 <!-- app-version -->
-**Current stable version:** `v1.0.0`
+**Current stable version:** `v1.0.1`
 
 ## Live App
 
