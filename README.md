@@ -3,7 +3,7 @@
 Hisaab is a modern, mobile-friendly bill splitting web app built for Indian restaurant bills. It supports menu-level participant selection, equal or custom item splits, GST, settlement-only rounding, payer reimbursements, AI bill scanning, and downloadable PNG summaries.
 
 <!-- app-version -->
-**Current stable version:** `v1.0.1`
+**Current stable version:** `v1.1.0`
 
 ## Live App
 
@@ -51,14 +51,15 @@ flowchart TD
     B --> D[styles.css responsive UI]
     A -->|Bill image| E[/api/scan-bill]
     E -->|Server-side API key| F[LlamaCloud Files API]
-    F --> G[LlamaExtract structured extraction]
-    G --> E
+    F --> G[Cost-effective Parse with camera correction]
+    G --> H[Cost-effective LlamaExtract]
+    H --> E
     E -->|Validated JSON| C
-    E -. unavailable .-> H[Tesseract.js browser fallback]
-    H --> C
-    C --> I[Editable OCR review]
-    C --> J[Settlement summary]
-    J --> K[PNG export]
+    E -. unavailable .-> I[Tesseract.js browser fallback]
+    I --> C
+    C --> J[Editable OCR review]
+    C --> K[Settlement summary]
+    K --> L[PNG export]
 ```
 
 The LlamaCloud key is never sent to the browser. The browser calls the same-origin Vercel endpoint, and only the serverless function reads `LLAMA_CLOUD_API_KEY`.
@@ -193,22 +194,23 @@ Content-Type: application/json
 }
 ```
 
-The endpoint validates the payload, applies basic per-IP rate limiting, uploads the image to LlamaCloud, and starts a LlamaExtract job. It returns:
+The endpoint validates the payload, applies basic per-IP rate limiting, uploads the image to LlamaCloud, and starts a cost-effective Parse job with camera-photo correction. It returns:
 
 ```json
 {
-  "jobId": "ext-...",
-  "status": "PENDING"
+  "jobId": "pjb-...",
+  "status": "PENDING",
+  "stage": "PARSING"
 }
 ```
 
 ### Polling Request
 
 ```http
-GET /api/scan-bill?jobId=ext-...
+GET /api/scan-bill?jobId=pjb-...
 ```
 
-Pending jobs return HTTP `202`. A completed job returns:
+Pending Parse jobs return HTTP `202`. When Parse completes, the endpoint starts a cost-effective Extract job and returns its new `ext-...` job ID with `stage: "EXTRACTING"`. The browser continues polling that ID until a completed job returns:
 
 ```json
 {
@@ -244,7 +246,7 @@ Pending jobs return HTTP `202`. A completed job returns:
 - `gst`
 - `total`
 
-The API uses the `cost_effective` tier by default, disables result caching, processes one page, and excludes totals/taxes from item rows through schema descriptions, a system prompt, and server-side validation.
+Both Parse and Extract are fixed to the `cost_effective` tier. Parse enables `input_options.image.camera_photo_correction`, English OCR, a one-page limit, and receipt-specific instructions. Extract disables result caching and excludes totals/taxes from item rows through schema descriptions, a system prompt, and server-side validation.
 
 ### Tesseract Fallback
 
@@ -335,10 +337,9 @@ Create `.env.local` from `.env.example` and provide your own key:
 ```env
 LLAMA_CLOUD_API_KEY=your_llamacloud_key
 LLAMA_CLOUD_PROJECT_ID=
-LLAMA_EXTRACT_TIER=cost_effective
 ```
 
-`LLAMA_CLOUD_PROJECT_ID` is optional unless the API key needs an explicit project. Supported extraction tiers are `cost_effective`, `agentic`, `agentic_plus`, and `turbo`.
+`LLAMA_CLOUD_PROJECT_ID` is optional unless the API key needs an explicit project. The application intentionally pins both Parse and Extract to the cost-effective tier.
 
 ### Run Locally With the API
 
@@ -363,7 +364,7 @@ npx.cmd vercel@latest link
 npx.cmd vercel@latest env add LLAMA_CLOUD_API_KEY production
 ```
 
-Optionally add `LLAMA_CLOUD_PROJECT_ID` and `LLAMA_EXTRACT_TIER` through the Vercel dashboard or CLI.
+Optionally add `LLAMA_CLOUD_PROJECT_ID` through the Vercel dashboard or CLI.
 
 ### Deploy
 
@@ -491,7 +492,6 @@ For a normal code rollback, prefer `git revert` on the unwanted commits, then pu
 |---|---:|---|---|
 | `LLAMA_CLOUD_API_KEY` | Yes | None | Authenticates server-side LlamaCloud requests |
 | `LLAMA_CLOUD_PROJECT_ID` | No | API key default | Selects a LlamaCloud project explicitly |
-| `LLAMA_EXTRACT_TIER` | No | `cost_effective` | Controls extraction quality, latency, and credits |
 
 ## Security
 

@@ -569,6 +569,26 @@ input:disabled,
   transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
 }
 
+.scan-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.camera-button {
+  border-color: rgba(67, 214, 181, 0.36);
+  background: rgba(67, 214, 181, 0.09);
+}
+
+.camera-button svg {
+  color: var(--mint);
+}
+
+.scan-button.camera-button:hover {
+  border-color: rgba(67, 214, 181, 0.62);
+  background: rgba(67, 214, 181, 0.15);
+}
+
 .scan-button:hover {
   transform: translateY(-2px);
   border-color: rgba(118, 169, 255, 0.7);

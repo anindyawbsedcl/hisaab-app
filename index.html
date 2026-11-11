@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#07111f">
   <meta name="description" content="Split restaurant bills, GST, and settlements in Indian rupees.">
-  <meta name="application-version" content="1.0.1">
+  <meta name="application-version" content="1.1.0">
   <title>Hisaab | Indian Bill Splitter</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -83,13 +83,22 @@
           <span class="feature-tag">Smart bill scan</span>
           <h3>Import from a bill photo</h3>
           <p>Use a clear, straight image. Item names, quantities, and prices stay editable before import.</p>
-          <label class="scan-button" for="billUpload">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 9h8v6H8z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span>Upload or photograph bill</span>
-            <input id="billUpload" type="file" accept="image/png,image/jpeg,image/webp" capture="environment">
-          </label>
+          <div class="scan-source-actions">
+            <label class="scan-button" for="billUpload">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4v11m0 0 4-4m-4 4-4-4M5 15v4h14v-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span>Choose from gallery</span>
+              <input id="billUpload" type="file" accept="image/png,image/jpeg,image/webp">
+            </label>
+            <label class="scan-button camera-button" for="billCamera">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 8h3l1.5-2h7L17 8h3v11H4zM12 11a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span>Take photo</span>
+              <input id="billCamera" type="file" accept="image/png,image/jpeg,image/webp" capture="environment">
+            </label>
+          </div>
           <small class="scan-privacy">Sent securely to LlamaExtract. If unavailable, private in-browser OCR is used.</small>
         </div>
 
@@ -248,7 +257,7 @@
 
     <footer>
       <span>Hisaab</span>
-      <span id="appVersion" class="app-version">v1.0.1</span>
+      <span id="appVersion" class="app-version">v1.1.0</span>
       <span>Made with <span class="footer-heart" role="img" aria-label="love">♥</span> by A N I N D Y A</span>
     </footer>
   </main>

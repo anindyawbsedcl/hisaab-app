@@ -2,6 +2,8 @@ const LLAMA_API_BASE = 'https://api.cloud.llamaindex.ai';
 const MAX_BASE64_LENGTH = 4_000_000;
 const RATE_WINDOW_MS = 15 * 60 * 1000;
 const RATE_LIMIT = 6;
+const PARSE_TIER = 'cost_effective';
+const EXTRACT_TIER = 'cost_effective';
 const rateBuckets = new Map();
 
 const BILL_SCHEMA = {
@@ -217,25 +219,57 @@ async function startExtraction(request, response) {
   const extension = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
   const formData = new FormData();
   formData.append('file', new Blob([bytes], { type: mimeType }), `bill.${extension}`);
-  formData.append('purpose', 'extract');
+  formData.append('purpose', 'parse');
 
-  const uploadedFile = await llamaRequest('/api/v1/beta/files', {
+  const uploadedFile = await llamaRequest(`/api/v1/beta/files${getProjectQuery()}`, {
     method: 'POST',
     body: formData
   });
   if (!uploadedFile.id) throw new ApiError(502, 'The OCR provider did not accept the image.', 'OCR_PROVIDER_ERROR');
 
-  const requestedTier = process.env.LLAMA_EXTRACT_TIER || 'cost_effective';
-  const tier = ['cost_effective', 'agentic', 'agentic_plus', 'turbo'].includes(requestedTier)
-    ? requestedTier
-    : 'cost_effective';
+  const parseJob = await llamaRequest(`/api/v2/parse${getProjectQuery()}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      file_id: uploadedFile.id,
+      tier: PARSE_TIER,
+      version: 'latest',
+      input_options: {
+        image: {
+          camera_photo_correction: true
+        }
+      },
+      processing_options: {
+        ocr_parameters: {
+          languages: ['en']
+        }
+      },
+      agentic_options: {
+        custom_prompt: 'This is an Indian restaurant receipt photographed on a phone. Preserve the restaurant name, each item row, quantity, unit price, line total, GST, and final total. Do not merge separate item rows.'
+      },
+      page_ranges: { max_pages: 1 },
+      disable_cache: true,
+      client_name: 'hisaab-app'
+    })
+  });
+
+  if (!parseJob.id) throw new ApiError(502, 'The OCR parse job could not be started.', 'OCR_PROVIDER_ERROR');
+  sendJson(response, 202, {
+    jobId: parseJob.id,
+    status: parseJob.status || 'PENDING',
+    stage: 'PARSING'
+  });
+}
+
+async function createExtractionJob(parseJobId) {
   const extraction = await llamaRequest(`/api/v2/extract${getProjectQuery()}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      file_input: uploadedFile.id,
+      file_input: parseJobId,
       configuration: {
-        tier,
+        tier: EXTRACT_TIER,
+        parse_tier: PARSE_TIER,
         version: 'latest',
         max_pages: 1,
         disable_cache: true,
@@ -248,17 +282,45 @@ async function startExtraction(request, response) {
   });
 
   if (!extraction.id) throw new ApiError(502, 'The OCR extraction job could not be started.', 'OCR_PROVIDER_ERROR');
-  sendJson(response, 202, { jobId: extraction.id, status: extraction.status || 'PENDING' });
+  return extraction;
 }
 
 async function getExtraction(request, response) {
   const requestUrl = new URL(request.url, `https://${request.headers.host || 'localhost'}`);
   const jobId = requestUrl.searchParams.get('jobId') || '';
-  if (!/^ext-[A-Za-z0-9-]{8,}$/.test(jobId)) {
-    throw new ApiError(400, 'A valid extraction job ID is required.', 'INVALID_JOB_ID');
+  if (!/^(?:pjb|ext)-[A-Za-z0-9-]{8,}$/.test(jobId)) {
+    throw new ApiError(400, 'A valid OCR job ID is required.', 'INVALID_JOB_ID');
   }
 
   const projectQuery = getProjectQuery();
+  if (jobId.startsWith('pjb-')) {
+    const parseJob = await llamaRequest(
+      `/api/v2/parse/${encodeURIComponent(jobId)}${projectQuery}`
+    );
+    const parseStatus = String(parseJob.status || '').toUpperCase();
+
+    if (parseStatus === 'COMPLETED') {
+      const extraction = await createExtractionJob(jobId);
+      sendJson(response, 202, {
+        jobId: extraction.id,
+        status: extraction.status || 'PENDING',
+        stage: 'EXTRACTING'
+      });
+      return;
+    }
+
+    if (parseStatus === 'FAILED' || parseStatus === 'CANCELLED') {
+      throw new ApiError(502, parseJob.error_message || 'The receipt parse failed.', 'OCR_PARSE_FAILED');
+    }
+
+    sendJson(response, 202, {
+      jobId,
+      status: parseStatus || 'PENDING',
+      stage: 'PARSING'
+    });
+    return;
+  }
+
   const separator = projectQuery ? '&' : '?';
   const job = await llamaRequest(
     `/api/v2/extract/${encodeURIComponent(jobId)}${projectQuery}${separator}expand=usage`
@@ -283,7 +345,11 @@ async function getExtraction(request, response) {
     throw new ApiError(502, job.error_message || 'The OCR extraction failed.', 'OCR_EXTRACTION_FAILED');
   }
 
-  sendJson(response, 202, { jobId, status: status || 'PENDING' });
+  sendJson(response, 202, {
+    jobId,
+    status: status || 'PENDING',
+    stage: 'EXTRACTING'
+  });
 }
 
 module.exports = async function handler(request, response) {
@@ -314,6 +380,8 @@ module.exports = async function handler(request, response) {
 
 module.exports._test = {
   BILL_SCHEMA,
+  PARSE_TIER,
+  EXTRACT_TIER,
   normalizeExtractedBill,
   createReadableText
 };

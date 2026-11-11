@@ -27,6 +27,7 @@ const elements = {
   itemFeedback: document.querySelector('#itemFeedback'),
   itemList: document.querySelector('#itemList'),
   billUpload: document.querySelector('#billUpload'),
+  billCamera: document.querySelector('#billCamera'),
   scanPlaceholder: document.querySelector('#scanPlaceholder'),
   billPreviewImage: document.querySelector('#billPreviewImage'),
   scanOverlay: document.querySelector('#scanOverlay'),
@@ -287,6 +288,7 @@ function clearBillScan() {
   state.billPreviewUrl = '';
   state.scannedItems = [];
   elements.billUpload.value = '';
+  elements.billCamera.value = '';
   elements.billPreviewImage.removeAttribute('src');
   elements.billPreviewImage.hidden = true;
   elements.scanPlaceholder.hidden = false;
@@ -361,21 +363,28 @@ async function scanBillWithCloud(file) {
 
   setScanStage('Preparing secure upload…', 8);
   const preparedImage = await prepareBillImage(file);
-  setScanStage('Starting LlamaExtract…', 16);
+  setScanStage('Starting cost-effective receipt scan…', 16);
   const created = await fetch('/api/scan-bill', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(preparedImage)
   }).then(readApiResponse);
   if (!created.jobId) throw new Error('Cloud OCR did not return a job ID.');
+  let currentJobId = created.jobId;
 
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 1500));
-    const progress = 20 + Math.min(74, Math.round((attempt / 59) * 74));
-    setScanStage('Extracting menu items…', progress);
-    const response = await fetch(`/api/scan-bill?jobId=${encodeURIComponent(created.jobId)}`);
-    if (response.status === 202) continue;
+    const progress = 20 + Math.min(74, Math.round((attempt / 79) * 74));
+    const response = await fetch(`/api/scan-bill?jobId=${encodeURIComponent(currentJobId)}`);
     const completed = await readApiResponse(response);
+    if (response.status === 202) {
+      currentJobId = completed.jobId || currentJobId;
+      const stageMessage = completed.stage === 'PARSING'
+        ? 'Correcting and reading receipt photo…'
+        : 'Structuring menu items…';
+      setScanStage(stageMessage, progress);
+      continue;
+    }
     const items = (completed.items || []).map((item) => makeDetectedItem(
       item.name,
       Number(item.quantity) || 1,
@@ -482,6 +491,7 @@ async function scanBillImage(file) {
     state.isScanning = false;
     elements.scanOverlay.hidden = true;
     elements.billUpload.value = '';
+    elements.billCamera.value = '';
   }
 }
 
@@ -1621,6 +1631,10 @@ async function exportBillImage(button) {
 elements.personForm.addEventListener('submit', addPerson);
 elements.itemForm.addEventListener('submit', addItem);
 elements.billUpload.addEventListener('change', (event) => {
+  const [file] = event.target.files;
+  if (file) scanBillImage(file);
+});
+elements.billCamera.addEventListener('change', (event) => {
   const [file] = event.target.files;
   if (file) scanBillImage(file);
 });
