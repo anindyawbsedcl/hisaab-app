@@ -1,6 +1,6 @@
 {
   "name": "hisaab-app",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Modern Indian bill splitter with AI receipt scanning and settlement calculations",
   "scripts": {

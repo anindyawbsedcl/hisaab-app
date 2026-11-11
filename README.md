@@ -3,7 +3,7 @@
 Hisaab is a modern, mobile-friendly bill splitting web app built for Indian restaurant bills. It supports menu-level participant selection, equal or custom item splits, GST, settlement-only rounding, payer reimbursements, AI bill scanning, and downloadable PNG summaries.
 
 <!-- app-version -->
-**Current stable version:** `v1.1.0`
+**Current stable version:** `v1.1.1`
 
 ## Live App
 
@@ -51,15 +51,14 @@ flowchart TD
     B --> D[styles.css responsive UI]
     A -->|Bill image| E[/api/scan-bill]
     E -->|Server-side API key| F[LlamaCloud Files API]
-    F --> G[Cost-effective Parse with camera correction]
-    G --> H[Cost-effective LlamaExtract]
-    H --> E
+    F --> G[Cost-effective LlamaExtract and Parse]
+    G --> E
     E -->|Validated JSON| C
-    E -. unavailable .-> I[Tesseract.js browser fallback]
-    I --> C
-    C --> J[Editable OCR review]
-    C --> K[Settlement summary]
-    K --> L[PNG export]
+    E -. unavailable .-> H[Tesseract.js browser fallback]
+    H --> C
+    C --> I[Editable OCR review]
+    C --> J[Settlement summary]
+    J --> K[PNG export]
 ```
 
 The LlamaCloud key is never sent to the browser. The browser calls the same-origin Vercel endpoint, and only the serverless function reads `LLAMA_CLOUD_API_KEY`.
@@ -194,23 +193,23 @@ Content-Type: application/json
 }
 ```
 
-The endpoint validates the payload, applies basic per-IP rate limiting, uploads the image to LlamaCloud, and starts a cost-effective Parse job with camera-photo correction. It returns:
+The endpoint validates the payload, applies basic per-IP rate limiting, uploads the image to LlamaCloud, and starts a cost-effective Extract job with its internal Parse tier explicitly set to cost-effective. It returns:
 
 ```json
 {
-  "jobId": "pjb-...",
+  "jobId": "ext-...",
   "status": "PENDING",
-  "stage": "PARSING"
+  "stage": "EXTRACTING"
 }
 ```
 
 ### Polling Request
 
 ```http
-GET /api/scan-bill?jobId=pjb-...
+GET /api/scan-bill?jobId=ext-...
 ```
 
-Pending Parse jobs return HTTP `202`. When Parse completes, the endpoint starts a cost-effective Extract job and returns its new `ext-...` job ID with `stage: "EXTRACTING"`. The browser continues polling that ID until a completed job returns:
+Pending jobs return HTTP `202`. The browser continues polling the extraction ID until a completed job returns:
 
 ```json
 {
@@ -246,7 +245,7 @@ Pending Parse jobs return HTTP `202`. When Parse completes, the endpoint starts 
 - `gst`
 - `total`
 
-Both Parse and Extract are fixed to the `cost_effective` tier. Parse enables `input_options.image.camera_photo_correction`, English OCR, a one-page limit, and receipt-specific instructions. Extract disables result caching and excludes totals/taxes from item rows through schema descriptions, a system prompt, and server-side validation.
+Both Extract and its internal Parse step are fixed to the `cost_effective` tier. The request disables result caching, limits processing to one page, and excludes totals/taxes from item rows through schema descriptions, a system prompt, and server-side validation.
 
 ### Tesseract Fallback
 
