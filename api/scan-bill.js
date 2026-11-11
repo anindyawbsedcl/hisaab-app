@@ -2,58 +2,9 @@ const LLAMA_API_BASE = 'https://api.cloud.llamaindex.ai';
 const MAX_BASE64_LENGTH = 4_000_000;
 const RATE_WINDOW_MS = 15 * 60 * 1000;
 const RATE_LIMIT = 6;
-const PARSE_TIER = 'cost_effective';
-const EXTRACT_TIER = 'cost_effective';
+const DEFAULT_PARSE_TIER = 'cost_effective';
+const ALLOWED_PARSE_TIERS = new Set(['fast', 'cost_effective']);
 const rateBuckets = new Map();
-
-const BILL_SCHEMA = {
-  type: 'object',
-  properties: {
-    venue_name: {
-      type: ['string', 'null'],
-      description: 'Restaurant, cafe, hotel, or food outlet name printed in the receipt header. Do not return an address, TAX INVOICE, RESTAURANT BILL, or RECEIPT.'
-    },
-    items: {
-      type: 'array',
-      description: 'Every purchased food or drink line item. Exclude taxes, discounts, service charges, subtotal, round-off, tips, and totals.',
-      items: {
-        type: 'object',
-        properties: {
-          name: {
-            type: 'string',
-            description: 'Menu item name exactly as printed, without its quantity or price.'
-          },
-          quantity: {
-            type: 'integer',
-            description: 'Number of units purchased. Use 1 when no quantity is printed.'
-          },
-          unit_price: {
-            type: 'number',
-            description: 'Price of one unit in Indian rupees before GST. If only a line total is printed, divide it by quantity.'
-          },
-          line_total: {
-            type: ['number', 'null'],
-            description: 'Printed total for this item line before GST, or unit_price multiplied by quantity when not printed.'
-          }
-        },
-        required: ['name', 'quantity', 'unit_price']
-      }
-    },
-    subtotal: {
-      type: ['number', 'null'],
-      description: 'Receipt subtotal before tax, if printed.'
-    },
-    gst: {
-      type: ['number', 'null'],
-      description: 'Total GST amount including CGST and SGST, if printed.'
-    },
-    total: {
-      type: ['number', 'null'],
-      description: 'Final payable receipt total, if printed.'
-    }
-  },
-  required: ['items']
-};
 
 class ApiError extends Error {
   constructor(status, message, code = 'SCAN_FAILED') {
@@ -136,70 +87,13 @@ async function llamaRequest(path, options = {}) {
   return payload;
 }
 
-function parseNumber(value) {
-  const amount = Number(String(value ?? '').replace(/[₹,\s]/g, ''));
-  return Number.isFinite(amount) ? amount : null;
-}
-
-function normalizeExtractedBill(extractResult) {
-  const result = Array.isArray(extractResult) ? extractResult[0] || {} : extractResult || {};
-  const extractedVenueName = String(result.venue_name || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 100);
-  const venueName = /^(?:restaurant\s+bill|tax\s+invoice|invoice|receipt|bill)$/i.test(extractedVenueName)
-    ? ''
-    : extractedVenueName;
-  const rawItems = Array.isArray(result.items) ? result.items : [];
-  const excludedRows = /\b(?:sub\s*total|grand\s*total|total|gst|cgst|sgst|igst|tax|discount|round(?:ing)?|service\s*charge|tip|amount\s*due|net\s*payable)\b/i;
-  const items = rawItems.map((item) => {
-    const name = String(item?.name || '').replace(/\s+/g, ' ').trim();
-    const quantityValue = parseNumber(item?.quantity);
-    const quantity = Number.isFinite(quantityValue) && quantityValue >= 1
-      ? Math.max(1, Math.round(quantityValue))
-      : 1;
-    const extractedUnitPrice = parseNumber(item?.unit_price);
-    const extractedLineTotal = parseNumber(item?.line_total);
-    const unitPrice = extractedUnitPrice > 0
-      ? extractedUnitPrice
-      : extractedLineTotal > 0
-        ? extractedLineTotal / quantity
-        : 0;
-    const lineTotal = extractedLineTotal > 0 ? extractedLineTotal : unitPrice * quantity;
-
-    return {
-      name,
-      quantity,
-      unitPrice: Math.round(unitPrice * 100) / 100,
-      lineTotal: Math.round(lineTotal * 100) / 100
-    };
-  }).filter((item) => item.name && item.unitPrice > 0 && !excludedRows.test(item.name));
-
-  return {
-    venueName,
-    items,
-    totals: {
-      subtotal: parseNumber(result.subtotal),
-      gst: parseNumber(result.gst),
-      total: parseNumber(result.total)
-    }
-  };
-}
-
-function createReadableText(bill) {
-  const lines = bill.items.map(
-    (item) => `${item.quantity} × ${item.name}  ${item.unitPrice.toFixed(2)}  ${item.lineTotal.toFixed(2)}`
-  );
-  if (bill.venueName) lines.unshift(`Venue: ${bill.venueName}`);
-  if (bill.totals.subtotal !== null) lines.push(`Subtotal ${bill.totals.subtotal.toFixed(2)}`);
-  if (bill.totals.gst !== null) lines.push(`GST ${bill.totals.gst.toFixed(2)}`);
-  if (bill.totals.total !== null) lines.push(`Total ${bill.totals.total.toFixed(2)}`);
-  return lines.join('\n');
-}
-
-async function startExtraction(request, response) {
+async function startParsing(request, response) {
   enforceRateLimit(request, response);
   const body = getRequestBody(request);
+  const tier = String(body.tier || DEFAULT_PARSE_TIER).toLowerCase();
+  if (!ALLOWED_PARSE_TIERS.has(tier)) {
+    throw new ApiError(400, 'OCR tier must be fast or cost_effective.', 'INVALID_PARSE_TIER');
+  }
   const mimeType = String(body.mimeType || '').toLowerCase();
   const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
   if (!allowedTypes.has(mimeType)) {
@@ -219,7 +113,7 @@ async function startExtraction(request, response) {
   const extension = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
   const formData = new FormData();
   formData.append('file', new Blob([bytes], { type: mimeType }), `bill.${extension}`);
-  formData.append('purpose', 'extract');
+  formData.append('purpose', 'parse');
 
   const uploadedFile = await llamaRequest(`/api/v1/beta/files${getProjectQuery()}`, {
     method: 'POST',
@@ -227,69 +121,78 @@ async function startExtraction(request, response) {
   });
   if (!uploadedFile.id) throw new ApiError(502, 'The OCR provider did not accept the image.', 'OCR_PROVIDER_ERROR');
 
-  const extraction = await llamaRequest(`/api/v2/extract${getProjectQuery()}`, {
+  const parseConfiguration = {
+    file_id: uploadedFile.id,
+    tier,
+    version: 'latest',
+    input_options: {
+      image: {
+        camera_photo_correction: true
+      }
+    },
+    page_ranges: { max_pages: 1 },
+    disable_cache: true,
+    client_name: 'hisaab-app'
+  };
+
+  if (tier === 'cost_effective') {
+    parseConfiguration.agentic_options = {
+      custom_prompt: 'This is an Indian restaurant receipt. Preserve the restaurant name and keep each purchased item on its own line with quantity, unit price, and line total. Preserve GST, subtotal, and final total labels.'
+    };
+  }
+
+  const parseJob = await llamaRequest(`/api/v2/parse${getProjectQuery()}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      file_input: uploadedFile.id,
-      configuration: {
-        tier: EXTRACT_TIER,
-        parse_tier: PARSE_TIER,
-        version: 'latest',
-        max_pages: 1,
-        disable_cache: true,
-        cite_sources: false,
-        confidence_scores: false,
-        system_prompt: 'This is an Indian restaurant receipt. Identify the restaurant or food outlet name from the header. Extract only purchased food and drink rows. Do not treat subtotal, GST, CGST, SGST, discounts, service charge, tips, round-off, or final totals as menu items.',
-        data_schema: BILL_SCHEMA
-      }
-    })
+    body: JSON.stringify(parseConfiguration)
   });
 
-  if (!extraction.id) throw new ApiError(502, 'The OCR extraction job could not be started.', 'OCR_PROVIDER_ERROR');
+  if (!parseJob.id) throw new ApiError(502, 'The OCR parse job could not be started.', 'OCR_PROVIDER_ERROR');
   sendJson(response, 202, {
-    jobId: extraction.id,
-    status: extraction.status || 'PENDING',
-    stage: 'EXTRACTING'
+    jobId: parseJob.id,
+    status: parseJob.status || 'PENDING',
+    stage: 'PARSING',
+    tier
   });
 }
 
-async function getExtraction(request, response) {
+async function getParsing(request, response) {
   const requestUrl = new URL(request.url, `https://${request.headers.host || 'localhost'}`);
   const jobId = requestUrl.searchParams.get('jobId') || '';
-  if (!/^ext-[A-Za-z0-9-]{8,}$/.test(jobId)) {
-    throw new ApiError(400, 'A valid extraction job ID is required.', 'INVALID_JOB_ID');
+  if (!/^pjb-[A-Za-z0-9-]{8,}$/.test(jobId)) {
+    throw new ApiError(400, 'A valid parse job ID is required.', 'INVALID_JOB_ID');
   }
 
   const projectQuery = getProjectQuery();
   const separator = projectQuery ? '&' : '?';
-  const job = await llamaRequest(
-    `/api/v2/extract/${encodeURIComponent(jobId)}${projectQuery}${separator}expand=usage`
+  const result = await llamaRequest(
+    `/api/v2/parse/${encodeURIComponent(jobId)}${projectQuery}${separator}expand=markdown_full&expand=text_full&expand=usage`
   );
+  const job = result.job || result;
   const status = String(job.status || '').toUpperCase();
+  const tier = String(job.tier || DEFAULT_PARSE_TIER).toLowerCase();
 
   if (status === 'COMPLETED') {
-    const bill = normalizeExtractedBill(job.extract_result);
+    const rawText = String(result.text_full || result.markdown_full || '').trim();
     sendJson(response, 200, {
       status,
-      provider: 'LlamaExtract',
-      venueName: bill.venueName,
-      items: bill.items,
-      totals: bill.totals,
-      rawText: createReadableText(bill),
+      provider: tier === 'fast' ? 'LlamaParse Fast' : 'LlamaParse Cost Effective',
+      tier,
+      rawText,
       credits: job.usage?.credits ?? null
     });
     return;
   }
 
   if (status === 'FAILED' || status === 'CANCELLED') {
-    throw new ApiError(502, job.error_message || 'The OCR extraction failed.', 'OCR_EXTRACTION_FAILED');
+    throw new ApiError(502, job.error_message || 'The OCR parse failed.', 'OCR_PARSE_FAILED');
   }
 
   sendJson(response, 202, {
     jobId,
     status: status || 'PENDING',
-    stage: 'EXTRACTING'
+    stage: 'PARSING',
+    tier
   });
 }
 
@@ -300,11 +203,11 @@ module.exports = async function handler(request, response) {
     }
 
     if (request.method === 'POST') {
-      await startExtraction(request, response);
+      await startParsing(request, response);
       return;
     }
     if (request.method === 'GET') {
-      await getExtraction(request, response);
+      await getParsing(request, response);
       return;
     }
 
@@ -320,9 +223,6 @@ module.exports = async function handler(request, response) {
 };
 
 module.exports._test = {
-  BILL_SCHEMA,
-  PARSE_TIER,
-  EXTRACT_TIER,
-  normalizeExtractedBill,
-  createReadableText
+  DEFAULT_PARSE_TIER,
+  ALLOWED_PARSE_TIERS
 };

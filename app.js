@@ -150,6 +150,12 @@ function parseBillLine(sourceLine) {
   const amount = String.raw`\d+(?:,\d{3})*(?:\.\d{1,2})?`;
   let match;
 
+  match = new RegExp(`^\\d{1,3}[.)]?\\s+(.+?)\\s+(\\d{1,3})\\s+(${amount})\\s+(${amount})$`).exec(line);
+  if (match) {
+    const quantity = Number(match[2]);
+    return makeDetectedItem(match[1], quantity, parseOcrAmount(match[3]), sourceLine);
+  }
+
   match = new RegExp(`^(\\d{1,3})\\s*(?:[xX×]\\s*)?(.+?)\\s+(${amount})\\s+(${amount})$`).exec(line);
   if (match) {
     const quantity = Number(match[1]);
@@ -214,7 +220,8 @@ function parseBillItems(rawText) {
 
 function detectVenueName(rawText) {
   const genericLabels = /^(?:restaurant\s+bill|tax\s+invoice|invoice|receipt|bill|customer\s+copy|order\s+summary)$/i;
-  const nonVenueDetails = /\b(?:gstin|fssai|phone|mobile|tel|date|time|table|cashier|server|address|road|street|avenue|pin\s*code)\b/i;
+  const nonVenueDetails = /\b(?:gstin|fssai|phone|tel|date|time|table|cashier|server|address|road|street|avenue|pin\s*code)\b/i;
+  const tableHeader = /\b(?:item|description|particulars)\b.*\b(?:qty|quantity)\b.*\b(?:rate|price|amount)\b/i;
   const lines = String(rawText)
     .split(/\r?\n/)
     .slice(0, 10)
@@ -227,6 +234,8 @@ function detectVenueName(rawText) {
       || line.length > 80
       || genericLabels.test(line)
       || nonVenueDetails.test(line)
+      || /\bmobile\s*(?:no|number|:)\b/i.test(line)
+      || tableHeader.test(line)
       || parseBillLine(line)
       || /\d+(?:\.\d{1,2})/.test(line)
     ) {
@@ -354,7 +363,7 @@ async function readApiResponse(response) {
   return payload;
 }
 
-async function scanBillWithCloud(file) {
+async function scanBillWithCloud(file, tier) {
   if (window.location.protocol === 'file:') {
     const error = new Error('The cloud endpoint requires a deployed or local server.');
     error.code = 'OCR_NOT_CONFIGURED';
@@ -363,11 +372,12 @@ async function scanBillWithCloud(file) {
 
   setScanStage('Preparing secure upload…', 8);
   const preparedImage = await prepareBillImage(file);
-  setScanStage('Starting cost-effective receipt scan…', 16);
+  const tierLabel = tier === 'fast' ? 'Fast' : 'Cost Effective';
+  setScanStage(`Starting ${tierLabel} receipt scan…`, 16);
   const created = await fetch('/api/scan-bill', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(preparedImage)
+    body: JSON.stringify({ ...preparedImage, tier })
   }).then(readApiResponse);
   if (!created.jobId) throw new Error('Cloud OCR did not return a job ID.');
   let currentJobId = created.jobId;
@@ -380,24 +390,26 @@ async function scanBillWithCloud(file) {
     if (response.status === 202) {
       currentJobId = completed.jobId || currentJobId;
       const stageMessage = completed.stage === 'PARSING'
-        ? 'Correcting and reading receipt photo…'
-        : 'Structuring menu items…';
+        ? `Reading receipt with ${tierLabel} OCR…`
+        : 'Processing receipt…';
       setScanStage(stageMessage, progress);
       continue;
     }
-    const items = (completed.items || []).map((item) => makeDetectedItem(
+    const rawText = String(completed.rawText || '');
+    const structuredItems = (completed.items || []).map((item) => makeDetectedItem(
       item.name,
       Number(item.quantity) || 1,
       Number(item.unitPrice),
       `${item.quantity || 1} ${item.name} ${item.unitPrice}`
     )).filter(Boolean);
-    if (!items.length) throw new Error('LlamaExtract did not find any menu items.');
+    const items = structuredItems.length ? structuredItems : parseBillItems(rawText);
+    if (!items.length) throw new Error('LlamaParse did not find any menu items.');
     setScanStage('Items detected', 100);
     return {
       items,
-      rawText: completed.rawText || '',
-      venueName: String(completed.venueName || '').trim(),
-      provider: completed.provider || 'LlamaExtract'
+      rawText,
+      venueName: String(completed.venueName || detectVenueName(rawText)).trim(),
+      provider: completed.provider || `LlamaParse ${tierLabel}`
     };
   }
 
@@ -450,12 +462,14 @@ async function scanBillImage(file) {
   elements.scanOverlay.hidden = false;
   state.isScanning = true;
   setScanStage('Preparing bill scan…', 4);
-  setFeedback(elements.scanFeedback, 'Scanning securely with LlamaExtract.');
+  const tier = document.querySelector('input[name="ocrTier"]:checked')?.value || 'cost_effective';
+  const tierLabel = tier === 'fast' ? 'Fast (1 credit)' : 'Cost Effective (3 credits)';
+  setFeedback(elements.scanFeedback, `Scanning securely with LlamaParse ${tierLabel}.`);
 
   try {
     let scanResult;
     try {
-      scanResult = await scanBillWithCloud(file);
+      scanResult = await scanBillWithCloud(file, tier);
     } catch (cloudError) {
       console.warn('Cloud OCR fallback:', cloudError.message);
       scanResult = await scanBillInBrowser(file);

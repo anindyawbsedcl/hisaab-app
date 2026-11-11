@@ -575,6 +575,65 @@ input:disabled,
   gap: 8px;
 }
 
+.scan-tier-picker {
+  display: grid;
+  width: 100%;
+  margin: 0 0 13px;
+  padding: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  border: 0;
+}
+
+.scan-tier-picker legend {
+  margin-bottom: 7px;
+  color: var(--ink-faint);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.scan-tier-option {
+  position: relative;
+  display: flex;
+  min-height: 54px;
+  padding: 9px 11px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: rgba(4, 12, 21, 0.36);
+  cursor: pointer;
+}
+
+.scan-tier-option:has(input:checked) {
+  border-color: rgba(255, 173, 77, 0.58);
+  background: rgba(255, 173, 77, 0.1);
+}
+
+.scan-tier-option input {
+  width: 15px;
+  min-height: 15px;
+  margin: 0;
+  accent-color: var(--saffron);
+}
+
+.scan-tier-option > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.scan-tier-option strong {
+  font-size: 0.7rem;
+}
+
+.scan-tier-option small {
+  color: var(--ink-faint);
+  font-size: 0.6rem;
+}
+
 .camera-button {
   border-color: rgba(67, 214, 181, 0.36);
   background: rgba(67, 214, 181, 0.09);

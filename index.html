@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#07111f">
   <meta name="description" content="Split restaurant bills, GST, and settlements in Indian rupees.">
-  <meta name="application-version" content="1.1.1">
+  <meta name="application-version" content="1.2.0">
   <title>Hisaab | Indian Bill Splitter</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -83,6 +83,23 @@
           <span class="feature-tag">Smart bill scan</span>
           <h3>Import from a bill photo</h3>
           <p>Use a clear, straight image. Item names, quantities, and prices stay editable before import.</p>
+          <fieldset class="scan-tier-picker">
+            <legend>OCR quality and credits</legend>
+            <label class="scan-tier-option">
+              <input type="radio" name="ocrTier" value="fast">
+              <span>
+                <strong>Fast</strong>
+                <small>1 credit</small>
+              </span>
+            </label>
+            <label class="scan-tier-option">
+              <input type="radio" name="ocrTier" value="cost_effective" checked>
+              <span>
+                <strong>Cost Effective</strong>
+                <small>3 credits</small>
+              </span>
+            </label>
+          </fieldset>
           <div class="scan-source-actions">
             <label class="scan-button" for="billUpload">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -99,7 +116,7 @@
               <input id="billCamera" type="file" accept="image/png,image/jpeg,image/webp" capture="environment">
             </label>
           </div>
-          <small class="scan-privacy">Sent securely to LlamaExtract. If unavailable, private in-browser OCR is used.</small>
+          <small class="scan-privacy">Sent securely to LlamaParse. If unavailable, private in-browser OCR is used.</small>
         </div>
 
         <div id="scanPreview" class="scan-preview">
@@ -257,7 +274,7 @@
 
     <footer>
       <span>Hisaab</span>
-      <span id="appVersion" class="app-version">v1.1.1</span>
+      <span id="appVersion" class="app-version">v1.2.0</span>
       <span>Made with <span class="footer-heart" role="img" aria-label="love">♥</span> by A N I N D Y A</span>
     </footer>
   </main>
