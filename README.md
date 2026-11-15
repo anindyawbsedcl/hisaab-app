@@ -3,7 +3,7 @@
 Hisaab is a modern, mobile-friendly bill splitting web app built for Indian restaurant bills. It supports menu-level participant selection, equal or custom item splits, GST, settlement-only rounding, payer reimbursements, AI bill scanning, and downloadable PNG summaries.
 
 <!-- app-version -->
-**Current stable version:** `v1.2.0`
+**Current stable version:** `v1.1.2`
 
 ## Live App
 
@@ -22,11 +22,11 @@ Hisaab is a modern, mobile-friendly bill splitting web app built for Indian rest
 - Show an exact person-by-person consumption and GST breakdown.
 - Round only the final repayments in the **Who pays whom** section.
 - Upload or photograph a restaurant bill.
-- Parse restaurant name, item names, quantities, and prices with LlamaParse.
+- Extract restaurant name, item names, quantities, and prices with LlamaExtract.
 - Fall back automatically to browser-based Tesseract OCR when cloud OCR is unavailable.
 - Auto-fill an empty Rendezvous field from the scanned restaurant name.
 - Review and edit every detected item before importing it.
-- Export a high-resolution styled PNG settlement summary.
+- Export a high-resolution PNG with every menu item, unit/line prices, consumer allocations, person totals, and settlements.
 - Use Indian rupee formatting through `Intl.NumberFormat('en-IN')`.
 - Work on desktop and mobile with no frontend framework or build step.
 
@@ -35,7 +35,7 @@ Hisaab is a modern, mobile-friendly bill splitting web app built for Indian rest
 | Layer | Technology |
 |---|---|
 | Frontend | HTML5, CSS3, vanilla JavaScript |
-| Cloud OCR | LlamaParse v2 through LlamaCloud |
+| Cloud OCR | LlamaExtract v2 through LlamaCloud |
 | OCR fallback | Tesseract.js 5 |
 | Backend | Vercel Node.js serverless function |
 | Hosting | Vercel |
@@ -51,7 +51,7 @@ flowchart TD
     B --> D[styles.css responsive UI]
     A -->|Bill image| E[/api/scan-bill]
     E -->|Server-side API key| F[LlamaCloud Files API]
-    F --> G[Fast or Cost Effective LlamaParse]
+    F --> G[Cost-effective LlamaExtract and Parse]
     G --> E
     E -->|Validated JSON| C
     E -. unavailable .-> H[Tesseract.js browser fallback]
@@ -68,7 +68,7 @@ The LlamaCloud key is never sent to the browser. The browser calls the same-orig
 ```text
 BillSplit/
 |-- api/
-|   `-- scan-bill.js       # Secure LlamaParse serverless endpoint
+|   `-- scan-bill.js       # Secure LlamaExtract serverless endpoint
 |-- .env.example           # Safe environment variable template
 |-- .gitignore             # Excludes secrets and Vercel metadata
 |-- app.js                 # State, UI rendering, calculations, OCR, export
@@ -189,50 +189,63 @@ Content-Type: application/json
 
 {
   "mimeType": "image/jpeg",
-  "imageBase64": "...",
-  "tier": "cost_effective"
+  "imageBase64": "..."
 }
 ```
 
-The endpoint validates the payload, applies basic per-IP rate limiting, uploads the image to LlamaCloud, and starts a Parse job using the selected tier. It returns:
+The endpoint validates the payload, applies basic per-IP rate limiting, uploads the image to LlamaCloud, and starts a cost-effective Extract job with its internal Parse tier explicitly set to cost-effective. It returns:
 
 ```json
 {
-  "jobId": "pjb-...",
+  "jobId": "ext-...",
   "status": "PENDING",
-  "stage": "PARSING",
-  "tier": "cost_effective"
+  "stage": "EXTRACTING"
 }
 ```
 
 ### Polling Request
 
 ```http
-GET /api/scan-bill?jobId=pjb-...
+GET /api/scan-bill?jobId=ext-...
 ```
 
-Pending jobs return HTTP `202`. The browser continues polling the Parse ID until a completed job returns:
+Pending jobs return HTTP `202`. The browser continues polling the extraction ID until a completed job returns:
 
 ```json
 {
   "status": "COMPLETED",
-  "provider": "LlamaParse Cost Effective",
-  "tier": "cost_effective",
-  "rawText": "TAJ SPICE HOUSE\n2 Paneer Tikka 190.00 380.00\nGST 19.00\nTOTAL 399.00",
-  "credits": 3
+  "provider": "LlamaExtract",
+  "venueName": "Taj Spice House",
+  "items": [
+    {
+      "name": "Paneer Tikka",
+      "quantity": 2,
+      "unitPrice": 190,
+      "lineTotal": 380
+    }
+  ],
+  "totals": {
+    "subtotal": 380,
+    "gst": 19,
+    "total": 399
+  }
 }
 ```
 
-### Parse Tiers
+### Extraction Schema
 
-The scanner offers two Parse-only choices:
+`api/scan-bill.js` sends a JSON Schema to LlamaExtract for:
 
-| Tier | Credits per page | Recommended use |
-|---|---:|---|
-| Fast | 1 | Clear, simple, straight receipts where speed and credits matter most |
-| Cost Effective | 3 | Default for denser bills, columns, and more difficult layouts |
+- `venue_name`
+- `items[].name`
+- `items[].quantity`
+- `items[].unit_price`
+- `items[].line_total`
+- `subtotal`
+- `gst`
+- `total`
 
-Both tiers use `version: "latest"`, camera-photo correction, a one-page limit, and disabled caching. Cost Effective also receives a restaurant-receipt prompt. The server returns full text/markdown, then the browser's deterministic parser extracts venue and editable item rows while filtering GST, subtotal, total, service charge, and payment lines.
+Both Extract and its internal Parse step are fixed to the `cost_effective` tier. The request disables result caching, limits processing to one page, and excludes totals/taxes from item rows through schema descriptions, a system prompt, and server-side validation.
 
 ### Tesseract Fallback
 
@@ -301,7 +314,7 @@ Map returned items into editable draft rows. Import only selected, valid rows in
 
 ### 10. Add PNG Export
 
-After calculation, save a normalized snapshot in `state.latestBill`. Draw the final image with Canvas API primitives instead of screenshotting the DOM. This produces a consistent high-resolution file independent of screen size.
+After calculation, save a normalized snapshot in `state.latestBill`. Include each menu item's quantity, unit price, line total, split mode, and exact consumer allocations from the same paise-safe share map used by the bill calculation. Draw the final image with Canvas API primitives instead of screenshotting the DOM. This produces a consistent high-resolution file independent of screen size.
 
 ### 11. Add Responsive Styling
 
@@ -325,7 +338,7 @@ LLAMA_CLOUD_API_KEY=your_llamacloud_key
 LLAMA_CLOUD_PROJECT_ID=
 ```
 
-`LLAMA_CLOUD_PROJECT_ID` is optional unless the API key needs an explicit project. Users select Fast or Cost Effective for each scan in the interface.
+`LLAMA_CLOUD_PROJECT_ID` is optional unless the API key needs an explicit project. The application intentionally pins both Parse and Extract to the cost-effective tier.
 
 ### Run Locally With the API
 
@@ -486,9 +499,9 @@ For a normal code rollback, prefer `git revert` on the unwanted commits, then pu
 - The API accepts only JPG, PNG, and WebP payloads.
 - Browser uploads are resized and compressed before transmission.
 - The endpoint limits prepared images to approximately 3 MB.
-- Parse job IDs are validated before polling.
+- Extraction job IDs are validated before polling.
 - POST requests are limited per IP on each warm serverless instance.
-- LlamaParse result caching is disabled.
+- LlamaExtract result caching is disabled.
 - Review Vercel logs without logging request image data or authorization headers.
 
 For a high-traffic public deployment, replace the in-memory rate limit with a persistent service such as Upstash Redis and add bot protection.
@@ -509,9 +522,9 @@ Before deploying a change, verify:
 - Repayment rounding does not change food/GST totals.
 - Existing Rendezvous text is not overwritten by OCR.
 - Empty Rendezvous is filled when a venue is detected.
-- Fast and Cost Effective LlamaParse results appear in the review table.
+- LlamaExtract results appear in the review table.
 - Tesseract fallback works when `/api/scan-bill` is unavailable.
-- PNG export includes totals and repayment instructions.
+- PNG export includes every item price, every item's consumers and allocated shares, person totals, and repayment instructions.
 - The page has no horizontal overflow at 390px width.
 - `/api/scan-bill` returns `503 OCR_NOT_CONFIGURED` without an API key rather than exposing a secret.
 

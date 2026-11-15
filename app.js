@@ -150,12 +150,6 @@ function parseBillLine(sourceLine) {
   const amount = String.raw`\d+(?:,\d{3})*(?:\.\d{1,2})?`;
   let match;
 
-  match = new RegExp(`^\\d{1,3}[.)]?\\s+(.+?)\\s+(\\d{1,3})\\s+(${amount})\\s+(${amount})$`).exec(line);
-  if (match) {
-    const quantity = Number(match[2]);
-    return makeDetectedItem(match[1], quantity, parseOcrAmount(match[3]), sourceLine);
-  }
-
   match = new RegExp(`^(\\d{1,3})\\s*(?:[xX×]\\s*)?(.+?)\\s+(${amount})\\s+(${amount})$`).exec(line);
   if (match) {
     const quantity = Number(match[1]);
@@ -220,8 +214,7 @@ function parseBillItems(rawText) {
 
 function detectVenueName(rawText) {
   const genericLabels = /^(?:restaurant\s+bill|tax\s+invoice|invoice|receipt|bill|customer\s+copy|order\s+summary)$/i;
-  const nonVenueDetails = /\b(?:gstin|fssai|phone|tel|date|time|table|cashier|server|address|road|street|avenue|pin\s*code)\b/i;
-  const tableHeader = /\b(?:item|description|particulars)\b.*\b(?:qty|quantity)\b.*\b(?:rate|price|amount)\b/i;
+  const nonVenueDetails = /\b(?:gstin|fssai|phone|mobile|tel|date|time|table|cashier|server|address|road|street|avenue|pin\s*code)\b/i;
   const lines = String(rawText)
     .split(/\r?\n/)
     .slice(0, 10)
@@ -234,8 +227,6 @@ function detectVenueName(rawText) {
       || line.length > 80
       || genericLabels.test(line)
       || nonVenueDetails.test(line)
-      || /\bmobile\s*(?:no|number|:)\b/i.test(line)
-      || tableHeader.test(line)
       || parseBillLine(line)
       || /\d+(?:\.\d{1,2})/.test(line)
     ) {
@@ -363,7 +354,7 @@ async function readApiResponse(response) {
   return payload;
 }
 
-async function scanBillWithCloud(file, tier) {
+async function scanBillWithCloud(file) {
   if (window.location.protocol === 'file:') {
     const error = new Error('The cloud endpoint requires a deployed or local server.');
     error.code = 'OCR_NOT_CONFIGURED';
@@ -372,12 +363,11 @@ async function scanBillWithCloud(file, tier) {
 
   setScanStage('Preparing secure upload…', 8);
   const preparedImage = await prepareBillImage(file);
-  const tierLabel = tier === 'fast' ? 'Fast' : 'Cost Effective';
-  setScanStage(`Starting ${tierLabel} receipt scan…`, 16);
+  setScanStage('Starting cost-effective receipt scan…', 16);
   const created = await fetch('/api/scan-bill', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...preparedImage, tier })
+    body: JSON.stringify(preparedImage)
   }).then(readApiResponse);
   if (!created.jobId) throw new Error('Cloud OCR did not return a job ID.');
   let currentJobId = created.jobId;
@@ -390,26 +380,24 @@ async function scanBillWithCloud(file, tier) {
     if (response.status === 202) {
       currentJobId = completed.jobId || currentJobId;
       const stageMessage = completed.stage === 'PARSING'
-        ? `Reading receipt with ${tierLabel} OCR…`
-        : 'Processing receipt…';
+        ? 'Correcting and reading receipt photo…'
+        : 'Structuring menu items…';
       setScanStage(stageMessage, progress);
       continue;
     }
-    const rawText = String(completed.rawText || '');
-    const structuredItems = (completed.items || []).map((item) => makeDetectedItem(
+    const items = (completed.items || []).map((item) => makeDetectedItem(
       item.name,
       Number(item.quantity) || 1,
       Number(item.unitPrice),
       `${item.quantity || 1} ${item.name} ${item.unitPrice}`
     )).filter(Boolean);
-    const items = structuredItems.length ? structuredItems : parseBillItems(rawText);
-    if (!items.length) throw new Error('LlamaParse did not find any menu items.');
+    if (!items.length) throw new Error('LlamaExtract did not find any menu items.');
     setScanStage('Items detected', 100);
     return {
       items,
-      rawText,
-      venueName: String(completed.venueName || detectVenueName(rawText)).trim(),
-      provider: completed.provider || `LlamaParse ${tierLabel}`
+      rawText: completed.rawText || '',
+      venueName: String(completed.venueName || '').trim(),
+      provider: completed.provider || 'LlamaExtract'
     };
   }
 
@@ -462,14 +450,12 @@ async function scanBillImage(file) {
   elements.scanOverlay.hidden = false;
   state.isScanning = true;
   setScanStage('Preparing bill scan…', 4);
-  const tier = document.querySelector('input[name="ocrTier"]:checked')?.value || 'cost_effective';
-  const tierLabel = tier === 'fast' ? 'Fast (1 credit)' : 'Cost Effective (3 credits)';
-  setFeedback(elements.scanFeedback, `Scanning securely with LlamaParse ${tierLabel}.`);
+  setFeedback(elements.scanFeedback, 'Scanning securely with LlamaExtract.');
 
   try {
     let scanResult;
     try {
-      scanResult = await scanBillWithCloud(file, tier);
+      scanResult = await scanBillWithCloud(file);
     } catch (cloudError) {
       console.warn('Cloud OCR fallback:', cloudError.message);
       scanResult = await scanBillInBrowser(file);
@@ -982,13 +968,19 @@ function validateBill() {
   return errors;
 }
 
+function getItemShares(item) {
+  return item.mode === 'equal'
+    ? splitEqually(item.pricePaise, item.participantIds)
+    : new Map(item.participantIds.map(
+      (personId) => [personId, toPaise(item.customShares[personId] || 0)]
+    ));
+}
+
 function calculatePersonTotals() {
   const consumption = new Map(state.people.map((person) => [person.id, 0]));
 
   state.items.forEach((item) => {
-    const itemShares = item.mode === 'equal'
-      ? splitEqually(item.pricePaise, item.participantIds)
-      : new Map(item.participantIds.map((personId) => [personId, toPaise(item.customShares[personId] || 0)]));
+    const itemShares = getItemShares(item);
 
     itemShares.forEach((share, personId) => {
       consumption.set(personId, (consumption.get(personId) || 0) + share);
@@ -1081,6 +1073,25 @@ function renderSummary({ payerId, amountPaidPaise, consumption, gstShares, final
     payerOwnShare,
     reimbursement,
     paymentDifference,
+    items: state.items.map((item) => {
+      const itemShares = getItemShares(item);
+      return {
+        id: item.id,
+        name: item.name,
+        quantity: item.quantity,
+        unitPricePaise: item.unitPricePaise,
+        lineTotalPaise: item.pricePaise,
+        splitMode: item.mode,
+        consumers: item.participantIds.map((personId) => {
+          const person = getPerson(personId);
+          return {
+            id: personId,
+            name: person?.name || 'Unknown',
+            sharePaise: itemShares.get(personId) || 0
+          };
+        })
+      };
+    }),
     people: state.people.map((person) => ({
       id: person.id,
       name: person.name,
@@ -1293,7 +1304,13 @@ function createBillCanvas(bill) {
   const padding = 72;
   const tableHeaderHeight = 54;
   const personRowHeight = 72;
-  const tableTop = 500;
+  const menuTableTop = 500;
+  const menuRows = (bill.items || []).map((item) => ({
+    item,
+    height: Math.max(78, 28 + Math.max(1, item.consumers.length) * 22)
+  }));
+  const menuTableHeight = tableHeaderHeight + menuRows.reduce((sum, row) => sum + row.height, 0);
+  const tableTop = menuTableTop + menuTableHeight + 92;
   const tableHeight = tableHeaderHeight + bill.people.length * personRowHeight;
   const settlementTop = tableTop + tableHeight + 92;
   const transfers = bill.people.filter((person) => !person.isPayer);
@@ -1410,7 +1427,85 @@ function createBillCanvas(bill) {
 
   context.fillStyle = '#eef5ff';
   context.font = '800 14px Manrope, sans-serif';
-  context.fillText('SHARE BY CONSUMPTION', padding, 474);
+  context.fillText('MENU ITEMS & CONSUMERS', padding, 474);
+
+  drawCanvasCard(context, padding, menuTableTop, width - padding * 2, menuTableHeight, {
+    radius: 22,
+    fill: 'rgba(10, 27, 45, 0.92)',
+    stroke: 'rgba(184, 210, 238, 0.15)',
+    shadow: true
+  });
+
+  const menuColumns = {
+    item: padding + 28,
+    quantity: 570,
+    unitPrice: 760,
+    lineTotal: 970,
+    consumers: 1015
+  };
+  context.fillStyle = '#748399';
+  context.font = '800 12px Manrope, sans-serif';
+  context.textAlign = 'left';
+  context.fillText('ITEM', menuColumns.item, menuTableTop + 34);
+  context.textAlign = 'right';
+  context.fillText('QTY', menuColumns.quantity, menuTableTop + 34);
+  context.fillText('UNIT PRICE', menuColumns.unitPrice, menuTableTop + 34);
+  context.fillText('LINE TOTAL', menuColumns.lineTotal, menuTableTop + 34);
+  context.textAlign = 'left';
+  context.fillText('CONSUMED BY', menuColumns.consumers, menuTableTop + 34);
+
+  let menuRowOffset = tableHeaderHeight;
+  menuRows.forEach(({ item, height: rowHeight }, index) => {
+    const rowTop = menuTableTop + menuRowOffset;
+    if (index % 2 === 0) {
+      context.fillStyle = 'rgba(255, 255, 255, 0.018)';
+      context.fillRect(padding + 1, rowTop, width - padding * 2 - 2, rowHeight);
+    }
+    context.strokeStyle = 'rgba(184, 210, 238, 0.09)';
+    context.beginPath();
+    context.moveTo(padding + 24, rowTop);
+    context.lineTo(width - padding - 24, rowTop);
+    context.stroke();
+
+    context.textAlign = 'left';
+    context.fillStyle = '#eef5ff';
+    context.font = '700 17px Manrope, sans-serif';
+    context.fillText(fitCanvasText(context, item.name, 390), menuColumns.item, rowTop + 31);
+    context.fillStyle = '#748399';
+    context.font = '600 11px Manrope, sans-serif';
+    context.fillText(`${item.splitMode === 'custom' ? 'Custom' : 'Equal'} split`, menuColumns.item, rowTop + 52);
+
+    context.textAlign = 'right';
+    context.fillStyle = '#a9b6c9';
+    context.font = '600 16px Manrope, sans-serif';
+    context.fillText(String(item.quantity), menuColumns.quantity, rowTop + 38);
+    context.fillText(formatMoney(item.unitPricePaise), menuColumns.unitPrice, rowTop + 38);
+    context.fillStyle = '#ffc777';
+    context.font = '800 17px Manrope, sans-serif';
+    context.fillText(formatMoney(item.lineTotalPaise), menuColumns.lineTotal, rowTop + 38);
+
+    context.textAlign = 'left';
+    context.font = '600 12px Manrope, sans-serif';
+    const consumers = item.consumers.length
+      ? item.consumers
+      : [{ name: 'No consumers', sharePaise: 0 }];
+    consumers.forEach((consumer, consumerIndex) => {
+      context.fillStyle = consumer.sharePaise > 0 ? '#a9b6c9' : '#748399';
+      const consumerText = `${consumer.name} · ${formatMoney(consumer.sharePaise)}`;
+      context.fillText(
+        fitCanvasText(context, consumerText, width - padding - menuColumns.consumers - 24),
+        menuColumns.consumers,
+        rowTop + 27 + consumerIndex * 22
+      );
+    });
+
+    menuRowOffset += rowHeight;
+  });
+
+  context.textAlign = 'left';
+  context.fillStyle = '#eef5ff';
+  context.font = '800 14px Manrope, sans-serif';
+  context.fillText('SHARE BY CONSUMPTION', padding, tableTop - 26);
 
   drawCanvasCard(context, padding, tableTop, width - padding * 2, tableHeight, {
     radius: 22,
